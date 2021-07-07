@@ -1,9 +1,11 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
-use proptest::{collection::vec, prelude::*};
-use types::proof::verify_test_accumulator_element;
+use crate::test_helpers::{
+    arb_three_hash_batches, arb_two_hash_batches, test_consistency_proof_impl, test_proof_impl,
+    test_range_proof_impl, verify, MockHashStore, TestAccumulator,
+};
 
 #[test]
 fn test_error_on_bad_parameters() {
@@ -26,39 +28,17 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
 
     #[test]
-    fn test_proof(
-        batch1 in vec(any::<HashValue>(), 1..100),
-        batch2 in vec(any::<HashValue>(), 1..100),
-    ) {
-        let total_leaves = batch1.len() + batch2.len();
-        let batch1_size = batch1.len() as u64;
-        let mut store = MockHashStore::new();
-
-        // insert all leaves in two batches
-        let (root_hash1, writes1) = TestAccumulator::append(&store, 0, &batch1).unwrap();
-        store.put_many(&writes1);
-        let (root_hash2, writes2) = TestAccumulator::append(&store, batch1_size, &batch2).unwrap();
-        store.put_many(&writes2);
-
-        // verify proofs for all leaves towards current root
-        verify(&store, total_leaves, root_hash2, &batch1, 0);
-        verify(&store, total_leaves, root_hash2, &batch2, batch1_size);
-
-        // verify proofs for all leaves of a subtree towards subtree root
-        verify(&store, batch1.len(), root_hash1, &batch1, 0);
+    fn test_proof((batch1, batch2) in arb_two_hash_batches(100)) {
+        test_proof_impl((batch1, batch2));
     }
-}
 
-fn verify(
-    store: &MockHashStore,
-    num_leaves: usize,
-    root_hash: HashValue,
-    leaves: &[HashValue],
-    first_leaf_idx: u64,
-) {
-    leaves.iter().enumerate().for_each(|(i, hash)| {
-        let leaf_index = first_leaf_idx + i as u64;
-        let proof = TestAccumulator::get_proof(store, num_leaves as u64, leaf_index).unwrap();
-        verify_test_accumulator_element(root_hash, *hash, leaf_index, &proof).unwrap();
-    });
+    #[test]
+    fn test_consistency_proof((batch1, batch2) in arb_two_hash_batches(100)) {
+        test_consistency_proof_impl((batch1, batch2));
+    }
+
+    #[test]
+    fn test_range_proof((batch1, batch2, batch3) in arb_three_hash_batches(100)) {
+        test_range_proof_impl((batch1, batch2, batch3));
+    }
 }

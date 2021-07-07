@@ -1,31 +1,31 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The nightly features that are commonly needed with async / await
-// Lets turn these on so that we can experiment a little bit
-#![feature(async_await)]
 // <Black magic>
 // Increase recursion limit to allow for use of select! macro.
 #![recursion_limit = "1024"]
 // </Black magic>
 
-// Public exports
-pub use common::NetworkPublicKeys;
-pub use interface::NetworkProvider;
+// TODO(philiphayes): uncomment when feature stabilizes (est. 1.50.0)
+// tracking issue: https://github.com/rust-lang/rust/issues/78835
+// #![doc = include_str!("../README.md")]
 
-pub mod interface;
-pub mod proto;
+pub mod connectivity_manager;
+pub mod constants;
+pub mod counters;
+pub mod error;
+pub mod logging;
+pub mod noise;
+pub mod peer;
+pub mod peer_manager;
 pub mod protocols;
-pub mod validator_network;
+pub mod transport;
 
-mod common;
-mod connectivity_manager;
-mod counters;
-mod error;
-mod peer_manager;
-mod sink;
-mod transport;
-mod utils;
+#[cfg(feature = "fuzzing")]
+pub mod fuzzing;
+#[cfg(any(test, feature = "testing", feature = "fuzzing"))]
+pub mod testutils;
 
-/// Type for unique identifier associated with each network protocol
-pub type ProtocolId = bytes::Bytes;
+pub type DisconnectReason = peer::DisconnectReason;
+pub type ConnectivityRequest = connectivity_manager::ConnectivityRequest;
+pub type ProtocolId = protocols::wire::handshake::v1::ProtocolId;

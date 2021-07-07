@@ -1,7 +1,8 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use bytes::{Buf, Bytes, IntoBuf};
+use bytes::{Buf, Bytes};
+use diem_infallible::Mutex;
 use futures::{
     channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
     io::{AsyncRead, AsyncWrite, Error, ErrorKind, Result},
@@ -9,12 +10,11 @@ use futures::{
     stream::{FusedStream, Stream},
     task::{Context, Poll},
 };
-use lazy_static::lazy_static;
-use std::{collections::HashMap, num::NonZeroU16, pin::Pin, sync::Mutex};
+use once_cell::sync::Lazy;
+use std::{collections::HashMap, num::NonZeroU16, pin::Pin};
 
-lazy_static! {
-    static ref SWITCHBOARD: Mutex<SwitchBoard> = Mutex::new(SwitchBoard(HashMap::default(), 1));
-}
+static SWITCHBOARD: Lazy<Mutex<SwitchBoard>> =
+    Lazy::new(|| Mutex::new(SwitchBoard(HashMap::default(), 1)));
 
 struct SwitchBoard(HashMap<NonZeroU16, UnboundedSender<MemorySocket>>, u16);
 
@@ -32,7 +32,6 @@ struct SwitchBoard(HashMap<NonZeroU16, UnboundedSender<MemorySocket>>, u16);
 /// # Examples
 ///
 /// ```rust,no_run
-/// #![feature(async_await)]
 /// use std::io::Result;
 ///
 /// use memsocket::{MemoryListener, MemorySocket};
@@ -63,7 +62,7 @@ pub struct MemoryListener {
 
 impl Drop for MemoryListener {
     fn drop(&mut self) {
-        let mut switchboard = (&*SWITCHBOARD).lock().unwrap();
+        let mut switchboard = (&*SWITCHBOARD).lock();
         // Remove the Sending side of the channel in the switchboard when
         // MemoryListener is dropped
         switchboard.0.remove(&self.port);
@@ -93,7 +92,7 @@ impl MemoryListener {
     ///
     /// [`local_addr`]: #method.local_addr
     pub fn bind(port: u16) -> Result<Self> {
-        let mut switchboard = (&*SWITCHBOARD).lock().unwrap();
+        let mut switchboard = (&*SWITCHBOARD).lock();
 
         // Get the port we should bind to.  If 0 was given, use a random port
         let port = if let Some(port) = NonZeroU16::new(port) {
@@ -103,11 +102,18 @@ impl MemoryListener {
             port
         } else {
             loop {
-                let port = match NonZeroU16::new(switchboard.1) {
-                    Some(p) => p,
-                    None => unreachable!(),
-                };
-                switchboard.1 += 1;
+                let port = NonZeroU16::new(switchboard.1).unwrap_or_else(|| unreachable!());
+
+                // The switchboard is full and all ports are in use
+                if Some(switchboard.0.len()) == std::u16::MAX.checked_sub(1).map(usize::from) {
+                    return Err(ErrorKind::AddrInUse.into());
+                }
+
+                // Instead of overflowing to 0, resume searching at port 1 since port 0 isn't a
+                // valid port to bind to.
+
+                switchboard.1 = switchboard.1.checked_add(1).unwrap_or(1);
+
                 if !switchboard.0.contains_key(&port) {
                     break port;
                 }
@@ -152,7 +158,6 @@ impl MemoryListener {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// #![feature(async_await)]
     /// use futures::prelude::*;
     /// use memsocket::MemoryListener;
     ///
@@ -214,7 +219,6 @@ impl<'a> Stream for Incoming<'a> {
 /// # Examples
 ///
 /// ```rust, no_run
-/// #![feature(async_await)]
 /// use futures::prelude::*;
 /// use memsocket::MemorySocket;
 ///
@@ -238,7 +242,7 @@ impl<'a> Stream for Incoming<'a> {
 pub struct MemorySocket {
     incoming: UnboundedReceiver<Bytes>,
     outgoing: UnboundedSender<Bytes>,
-    current_buffer: Option<<Bytes as IntoBuf>::Buf>,
+    current_buffer: Option<Bytes>,
     seen_eof: bool,
 }
 
@@ -250,9 +254,7 @@ impl MemorySocket {
     /// ```rust
     /// use memsocket::MemorySocket;
     ///
-    /// # fn main() {
     /// let (socket_a, socket_b) = MemorySocket::new_pair();
-    /// # }
     /// ```
     pub fn new_pair() -> (Self, Self) {
         let (a_tx, a_rx) = mpsc::unbounded();
@@ -288,20 +290,15 @@ impl MemorySocket {
     /// # Ok(())}
     /// ```
     pub fn connect(port: u16) -> Result<MemorySocket> {
-        let mut switchboard = (&*SWITCHBOARD).lock().unwrap();
+        let mut switchboard = (&*SWITCHBOARD).lock();
 
         // Find port to connect to
-        let port = if let Some(port) = NonZeroU16::new(port) {
-            port
-        } else {
-            return Err(ErrorKind::AddrNotAvailable.into());
-        };
+        let port = NonZeroU16::new(port).ok_or(ErrorKind::AddrNotAvailable)?;
 
-        let sender = if let Some(s) = switchboard.0.get_mut(&port) {
-            s
-        } else {
-            return Err(ErrorKind::AddrNotAvailable.into());
-        };
+        let sender = switchboard
+            .0
+            .get_mut(&port)
+            .ok_or(ErrorKind::AddrNotAvailable)?;
 
         let (socket_a, socket_b) = Self::new_pair();
         // Send the socket to the listener
@@ -366,7 +363,7 @@ impl AsyncRead for MemorySocket {
                                     return Poll::Pending;
                                 }
                             }
-                            Poll::Ready(Some(buf)) => Some(buf.into_buf()),
+                            Poll::Ready(Some(buf)) => Some(buf),
                             Poll::Ready(None) => return Poll::Ready(Ok(bytes_read)),
                         }
                     };
@@ -387,7 +384,7 @@ impl AsyncWrite for MemorySocket {
 
         match self.outgoing.poll_ready(context) {
             Poll::Ready(Ok(())) => {
-                if let Err(e) = self.outgoing.start_send(buf.into()) {
+                if let Err(e) = self.outgoing.start_send(Bytes::copy_from_slice(buf)) {
                     if e.is_disconnected() {
                         return Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, e)));
                     }

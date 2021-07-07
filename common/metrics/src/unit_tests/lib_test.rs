@@ -1,16 +1,14 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
 use super::super::*;
 use assert_approx_eq::assert_approx_eq;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use prometheus::{core::Collector, proto::MetricFamily, Counter, IntCounter, Opts, Registry};
-use rusty_fork::{rusty_fork_id, rusty_fork_test, rusty_fork_test_name};
+use rusty_fork::rusty_fork_test;
 
-lazy_static! {
-    pub static ref INT_COUNTER: IntCounter =
-        register_int_counter!("INT_COUNTER", "An integer counter").unwrap();
-}
+pub static INT_COUNTER: Lazy<IntCounter> =
+    Lazy::new(|| register_int_counter!("INT_COUNTER", "An integer counter").unwrap());
 
 rusty_fork_test! {
 #[test]
@@ -32,7 +30,7 @@ fn gather_metrics_test() {
 // has been successfully published to prometheus and the result gathered reflect the value change.
 #[test]
 fn publish_metrics_test() {
-    let counter_opts = Opts::new("libra_test_counter", "libra test counter help");
+    let counter_opts = Opts::new("diem_test_counter", "diem test counter help");
     let counter = Counter::with_opts(counter_opts).unwrap();
 
     let r = Registry::new();
@@ -43,8 +41,8 @@ fn publish_metrics_test() {
 
     assert_eq!(metric_families.len(), 1);
     let m: &MetricFamily = metric_families.get(0).unwrap();
-    assert_eq!("libra test counter help", m.get_help());
-    assert_eq!("libra_test_counter", m.get_name());
+    assert_eq!("diem test counter help", m.get_help());
+    assert_eq!("diem_test_counter", m.get_name());
 
     let metrics = m.get_metric();
     assert_eq!(metrics.len(), 1);

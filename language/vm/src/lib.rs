@@ -1,25 +1,27 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-#![feature(never_type)]
-#![feature(exhaustive_patterns)]
+#![forbid(unsafe_code)]
+
+#[macro_use]
+extern crate mirai_annotations;
 
 use std::fmt;
 
 pub mod access;
 pub mod check_bounds;
+pub mod compatibility;
 #[macro_use]
 pub mod errors;
+pub mod constant;
 pub mod deserializer;
 pub mod file_format;
 pub mod file_format_common;
-pub mod gas_schedule;
 pub mod internals;
-pub mod printers;
+pub mod normalized;
+#[cfg(any(test, feature = "fuzzing"))]
 pub mod proptest_types;
-pub mod resolver;
 pub mod serializer;
-pub mod transaction_metadata;
 pub mod views;
 
 #[cfg(test)]
@@ -33,17 +35,22 @@ pub enum IndexKind {
     ModuleHandle,
     StructHandle,
     FunctionHandle,
+    FieldHandle,
+    FriendDeclaration,
+    FunctionInstantiation,
+    FieldInstantiation,
     StructDefinition,
-    FieldDefinition,
+    StructDefInstantiation,
     FunctionDefinition,
-    TypeSignature,
-    FunctionSignature,
-    LocalsSignature,
-    StringPool,
-    ByteArrayPool,
-    AddressPool,
+    FieldDefinition,
+    Signature,
+    Identifier,
+    AddressIdentifier,
+    ConstantPool,
     LocalPool,
     CodeDefinition,
+    TypeParameter,
+    MemberCount,
 }
 
 impl IndexKind {
@@ -55,16 +62,21 @@ impl IndexKind {
             ModuleHandle,
             StructHandle,
             FunctionHandle,
+            FieldHandle,
+            FriendDeclaration,
+            StructDefInstantiation,
+            FunctionInstantiation,
+            FieldInstantiation,
             StructDefinition,
-            FieldDefinition,
             FunctionDefinition,
-            TypeSignature,
-            FunctionSignature,
-            LocalsSignature,
-            StringPool,
-            AddressPool,
+            FieldDefinition,
+            Signature,
+            Identifier,
+            ConstantPool,
             LocalPool,
             CodeDefinition,
+            TypeParameter,
+            MemberCount,
         ]
     }
 }
@@ -77,23 +89,29 @@ impl fmt::Display for IndexKind {
             ModuleHandle => "module handle",
             StructHandle => "struct handle",
             FunctionHandle => "function handle",
+            FieldHandle => "field handle",
+            FriendDeclaration => "friend declaration",
+            StructDefInstantiation => "struct instantiation",
+            FunctionInstantiation => "function instantiation",
+            FieldInstantiation => "field instantiation",
             StructDefinition => "struct definition",
-            FieldDefinition => "field definition",
             FunctionDefinition => "function definition",
-            TypeSignature => "type signature",
-            FunctionSignature => "function signature",
-            LocalsSignature => "locals signature",
-            StringPool => "string pool",
-            ByteArrayPool => "byte_array pool",
-            AddressPool => "address pool",
+            FieldDefinition => "field definition",
+            Signature => "signature",
+            Identifier => "identifier",
+            AddressIdentifier => "address identifier",
+            ConstantPool => "constant pool",
             LocalPool => "local pool",
             CodeDefinition => "code definition pool",
+            TypeParameter => "type parameter",
+            MemberCount => "field offset",
         };
 
         f.write_str(desc)
     }
 }
 
+// TODO: is this outdated?
 /// Represents the kind of a signature token.
 #[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SignatureTokenKind {

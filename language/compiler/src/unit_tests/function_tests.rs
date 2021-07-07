@@ -1,27 +1,25 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-mod testutils;
-use super::*;
-use testutils::compile_module_string;
+use crate::unit_tests::testutils::compile_module_string;
 
 #[test]
-fn compile_script_with_functions() {
+fn compile_module_with_functions() {
     let code = String::from(
         "
         module Foobar {
-            resource FooCoin { value: u64 }
+            struct FooCoin { value: u64 }
 
-            public value(this: &R#Self.FooCoin): u64 {
+            public value(this: &Self.FooCoin): u64 {
                 let value_ref: &u64;
                 value_ref = &move(this).value;
                 return *move(value_ref);
             }
 
-            public deposit(this: &mut R#Self.FooCoin, check: R#Self.FooCoin) {
+            public deposit(this: &mut Self.FooCoin, check: Self.FooCoin) {
                 let value_ref: &mut u64;
                 let value: u64;
-                let check_ref: &R#Self.FooCoin;
+                let check_ref: &Self.FooCoin;
                 let check_value: u64;
                 let new_value: u64;
                 let i: u64;
@@ -64,43 +62,45 @@ fn generate_function(name: &str, num_formals: usize, num_locals: usize) -> Strin
 
     code.push_str("return;");
 
-    code.push_str("}");
+    code.push('}');
 
     code
 }
 
 #[test]
-fn compile_script_with_large_frame() {
+fn compile_module_with_large_frame() {
     let mut code = String::from(
         "
         module Foobar {
-            resource FooCoin { value: u64 }
+            struct FooCoin { value: u64 }
         ",
     );
 
     // Max number of locals (formals + local variables) is u8::max_value().
     code.push_str(&generate_function("foo_func", 128, 127));
 
-    code.push_str("}");
+    code.push('}');
 
     let compiled_module_res = compile_module_string(&code);
     assert!(compiled_module_res.is_ok());
 }
 
 #[test]
-fn compile_script_with_invalid_large_frame() {
-    let mut code = String::from(
+fn compile_module_with_script_visibility_functions() {
+    let code = String::from(
         "
         module Foobar {
-            resource FooCoin { value: u64 }
+            public(script) foo() {
+                return;
+            }
+
+            public(script) bar() {
+                Self.foo();
+                return;
+            }
+        }
         ",
     );
-
-    // Max number of locals (formals + local variables) is u8::max_value().
-    code.push_str(&generate_function("foo_func", 128, 128));
-
-    code.push_str("}");
-
     let compiled_module_res = compile_module_string(&code);
-    assert!(compiled_module_res.is_err());
+    assert!(compiled_module_res.is_ok());
 }

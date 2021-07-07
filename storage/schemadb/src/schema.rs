@@ -1,17 +1,17 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
 //! This module provides traits that define the behavior of a schema and its associated key and
 //! value types, along with helpers to define a new schema with ease.
 use crate::ColumnFamilyName;
-use failure::Result;
+use anyhow::Result;
 use std::fmt::Debug;
 
 /// Macro for defining a SchemaDB schema.
 ///
 /// `define_schema!` allows a schema to be defined in the following syntax:
 /// ```
-/// use failure::Result;
+/// use anyhow::Result;
 /// use schemadb::{
 ///     define_schema,
 ///     schema::{KeyCodec, SeekKeyCodec, ValueCodec},

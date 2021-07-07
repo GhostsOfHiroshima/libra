@@ -1,4 +1,4 @@
-// Copyright (c) The Libra Core Contributors
+// Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
 //! `OpCounters` is a collection of convenience methods to add arbitrary counters to modules.
@@ -7,8 +7,35 @@
 use prometheus::{
     core::{Collector, Desc},
     proto::MetricFamily,
-    Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+    Histogram, HistogramOpts, HistogramTimer, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec,
+    Opts,
 };
+
+use std::time::Duration;
+
+/// A small wrapper around Histogram to handle the special case
+/// of duration buckets.
+/// This Histogram will handle the correct granularity for logging
+/// time duration in a way that fits the used buckets.
+pub struct DurationHistogram {
+    histogram: Histogram,
+}
+
+impl DurationHistogram {
+    pub fn new(histogram: Histogram) -> DurationHistogram {
+        DurationHistogram { histogram }
+    }
+
+    pub fn observe_duration(&self, d: Duration) {
+        // Duration is full seconds + nanos elapsed from the previous full second
+        let v = d.as_secs() as f64 + f64::from(d.subsec_nanos()) / 1e9;
+        self.histogram.observe(v);
+    }
+
+    pub fn start_timer(&self) -> HistogramTimer {
+        self.histogram.start_timer()
+    }
+}
 
 #[derive(Clone)]
 pub struct OpMetrics {
@@ -16,7 +43,7 @@ pub struct OpMetrics {
     counters: IntCounterVec,
     gauges: IntGaugeVec,
     peer_gauges: IntGaugeVec,
-    histograms: HistogramVec,
+    duration_histograms: HistogramVec,
 }
 
 impl OpMetrics {
@@ -31,7 +58,7 @@ impl OpMetrics {
             .unwrap(),
             gauges: IntGaugeVec::new(
                 Opts::new(
-                    format!("{}_gauge", name_str.clone()),
+                    format!("{}_gauge", name_str),
                     format!("Gauges for {}", name_str),
                 ),
                 &["op"],
@@ -39,15 +66,15 @@ impl OpMetrics {
             .unwrap(),
             peer_gauges: IntGaugeVec::new(
                 Opts::new(
-                    format!("{}_peer_gauge", name_str.clone()),
+                    format!("{}_peer_gauge", name_str),
                     format!("Gauges of each remote peer for {}", name_str),
                 ),
                 &["op", "remote_peer_id"],
             )
             .unwrap(),
-            histograms: HistogramVec::new(
+            duration_histograms: HistogramVec::new(
                 HistogramOpts::new(
-                    format!("{}_duration", name_str.clone()),
+                    format!("{}_duration", name_str),
                     format!("Histogram values for {}", name_str),
                 ),
                 &["op"],
@@ -74,16 +101,6 @@ impl OpMetrics {
     }
 
     #[inline]
-    pub fn counter(&self, name: &str) -> IntCounter {
-        self.counters.with_label_values(&[name])
-    }
-
-    #[inline]
-    pub fn histogram(&self, name: &str) -> Histogram {
-        self.histograms.with_label_values(&[name])
-    }
-
-    #[inline]
     pub fn inc(&self, op: &str) {
         self.counters.with_label_values(&[op]).inc();
     }
@@ -92,17 +109,7 @@ impl OpMetrics {
     pub fn inc_by(&self, op: &str, v: usize) {
         // The underlying method is expecting i64, but most of the types
         // we're going to log are `u64` or `usize`.
-        self.counters.with_label_values(&[op]).inc_by(v as i64);
-    }
-
-    #[inline]
-    pub fn add(&self, op: &str) {
-        self.gauges.with_label_values(&[op]).inc();
-    }
-
-    #[inline]
-    pub fn sub(&self, op: &str) {
-        self.gauges.with_label_values(&[op]).dec();
+        self.counters.with_label_values(&[op]).inc_by(v as u64);
     }
 
     #[inline]
@@ -114,7 +121,19 @@ impl OpMetrics {
 
     #[inline]
     pub fn observe(&self, op: &str, v: f64) {
-        self.histograms.with_label_values(&[op]).observe(v);
+        self.duration_histograms.with_label_values(&[op]).observe(v);
+    }
+
+    pub fn observe_duration(&self, op: &str, d: Duration) {
+        // Duration is full seconds + nanos elapsed from the previous full second
+        let v = d.as_secs() as f64 + f64::from(d.subsec_nanos()) / 1e9;
+        self.duration_histograms.with_label_values(&[op]).observe(v);
+    }
+
+    pub fn timer(&self, op: &str) -> HistogramTimer {
+        self.duration_histograms
+            .with_label_values(&[op])
+            .start_timer()
     }
 }
 
@@ -124,7 +143,7 @@ impl Collector for OpMetrics {
         ms.extend(self.counters.desc());
         ms.extend(self.gauges.desc());
         ms.extend(self.peer_gauges.desc());
-        ms.extend(self.histograms.desc());
+        ms.extend(self.duration_histograms.desc());
         ms
     }
 
@@ -133,7 +152,7 @@ impl Collector for OpMetrics {
         ms.extend(self.counters.collect());
         ms.extend(self.gauges.collect());
         ms.extend(self.peer_gauges.collect());
-        ms.extend(self.histograms.collect());
+        ms.extend(self.duration_histograms.collect());
         ms
     }
 }
